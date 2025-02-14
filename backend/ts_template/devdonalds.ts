@@ -62,36 +62,44 @@ const parse_handwriting = (recipeName: string): string | null => {
 // [TASK 2] ====================================================================
 // Endpoint that adds a CookbookEntry to your magical cookbook
 app.post("/entry", (req:Request, res:Response) => {
-  const entry = req.body;
+  const entry = req.body as cookbookEntry;
 
   try {
-    validateEntry(entry);
+    const result = addEntry(entry);
+    res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
     return;
   }
-
-  res.json(addEntry(entry));
   return;
 });
 
+// Adds an entry to the cookbook
+const addEntry = (entry: cookbookEntry) => {
+  if (!validateEntry(entry)) {
+    throw new Error("skill issue");
+  }
+
+  cookbook.push(entry);
+  return {};
+}
+
 // Validates a cookbook entry
-const validateEntry = (entry: cookbookEntry) => {
-  if (cookbook.some((e) => e.name === entry.name)) throw new Error("skill issue");
+const validateEntry = (entry: cookbookEntry): boolean => {
+  if (cookbook.some((e) => e.name === entry.name)) return false;
 
   if (entry.type === "recipe") {
     const recipe = entry as recipe;
-    if (hasDuplicates(recipe.requiredItems)) {
-      throw new Error("skill issue");
-    }
+    return !hasDuplicates(recipe.requiredItems);
   } else if (entry.type === "ingredient") {
     const ingredient = entry as ingredient;
     if (ingredient.cookTime < 0) {
-      throw new Error("skill issue");
+      return false;
     }
   } else {
-    throw new Error("skill issue");
+    return false;
   }
+  return true;
 }
 
 // Returns whether or not an array contains duplicate ingredients
@@ -106,43 +114,27 @@ const hasDuplicates = (items: requiredItem[]): boolean => {
   return false;
 }
 
-// Adds an entry to the cookbook
-const addEntry = (entry: cookbookEntry) => {
-  cookbook.push(entry);
-  return {};
-}
-
 // [TASK 3] ====================================================================
 // Endpoint that returns a summary of a recipe that corresponds to a query name
 app.get("/summary", (req:Request, res:Request) => {
   const name = req.query.name as string;
 
   try {
-    validateName(name);
+    const result = getSummary(name);
+    res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
     return;
   }
-
-  res.json(getSummary(name));
   return;
 });
 
-// Validates the name of a recipe
-const validateName = (name: string) => {
-  const entry = cookbook.find((e) => e.name === name);
-  if (!entry || entry.type !== "recipe") throw new Error("skill issue");
-  
-  const recipe = entry as recipe;
-  for (const item of recipe.requiredItems) {
-    if (!cookbook.some((e) => e.name === item.name)) {
-      throw new Error("skill issue");
-    }
-  }
-}
-
 // Returns the summary of a recipe
 const getSummary = (name: string): summary => {
+  if (!validateRecipe(name)) {
+    throw new Error("skill issue");
+  }
+
   const recipe = cookbook.find((e) => e.name === name) as recipe;
   const summary = {
     name: name,
@@ -150,25 +142,39 @@ const getSummary = (name: string): summary => {
     ingredients: [] as requiredItem[],
   }
 
-  addIngredientsToSummary(recipe, summary);
+  addIngredientsToSummary(recipe, summary, 1);
 
   return summary;
 }
 
+// Validates a recipe
+const validateRecipe = (name: string): boolean => {
+  const entry = cookbook.find((e) => e.name === name);
+  if (!entry || entry.type !== "recipe") return false;
+  
+  const recipe = entry as recipe;
+  for (const item of recipe.requiredItems) {
+    if (!cookbook.some((e) => e.name === item.name)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Adds ingredients of a recipe to a recipe summary
-const addIngredientsToSummary = (recipe: recipe, summary: summary) => {
+const addIngredientsToSummary = (recipe: recipe, summary: summary, recipeQuantity: number) => {
   for (const item of recipe.requiredItems) {
     const entry = cookbook.find((e) => e.name === item.name);
     if (entry.type === "recipe") {
-      addIngredientsToSummary(entry as recipe, summary);
+      addIngredientsToSummary(entry as recipe, summary, item.quantity);
     } else {
       const ingredient = summary.ingredients.find((i) => i.name === entry.name);
       if (ingredient) {
-        ingredient.quantity += item.quantity;
+        ingredient.quantity += (item.quantity * recipeQuantity);
       } else {
-        summary.ingredients.push(item);
+        summary.ingredients.push({ name: item.name, quantity: (item.quantity * recipeQuantity )});
       }
-      summary.cookTime += (entry as ingredient).cookTime * item.quantity;
+      summary.cookTime += (entry as ingredient).cookTime * item.quantity * recipeQuantity;
     }
   }
 }
